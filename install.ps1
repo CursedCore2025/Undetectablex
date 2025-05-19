@@ -32,7 +32,7 @@ Start-Job -ScriptBlock {
                 Write-Output "Deleted imgui.ini at $(Get-Date -Format 'HH:mm:ss')"
             } catch {}
         }
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Milliseconds 50
     }
 } | Out-Null
 
