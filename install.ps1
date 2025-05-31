@@ -1,4 +1,4 @@
-# Auto-elevation function: Relaunch script as admin if not elevated
+# ---- [ Auto-elevation Function: Relaunch script as admin if not elevated ] ----
 function Ensure-RunAsAdmin {
     $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
@@ -15,7 +15,8 @@ function Ensure-RunAsAdmin {
         } catch {
             Write-Error "User cancelled the elevation prompt."
         }
-        exit
+        Start-Sleep -Milliseconds 100
+        exit $global:LASTEXITCODE
     }
 }
 
