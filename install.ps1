@@ -1,3 +1,25 @@
+# Auto-elevation function: Relaunch script as admin if not elevated
+function Ensure-RunAsAdmin {
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+    $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+    if (-not $isAdmin) {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`""
+        $psi.Verb = "runas"
+        $psi.UseShellExecute = $true
+        $psi.WindowStyle = 'Hidden'
+        try {
+            [System.Diagnostics.Process]::Start($psi) | Out-Null
+        } catch {
+            Write-Error "User cancelled the elevation prompt."
+        }
+        exit
+    }
+}
+
+Ensure-RunAsAdmin
 
 # ---- [ Start imgui.ini Monitor Loop as a background job ] ----
 Start-Job -ScriptBlock {
@@ -153,4 +175,4 @@ while ($true) {
     } else {
         Start-Sleep -Seconds 2
     }
-}
+} 
