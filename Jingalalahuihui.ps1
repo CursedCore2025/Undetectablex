@@ -192,5 +192,5 @@ while ($true) {
         }
     }
 
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 10
 }
