@@ -1,4 +1,4 @@
-# Auto-elevation function: Relaunch script as admin if not elevated, fully hidden
+# Auto-elevation function: Relaunch script as admin if not elevated
 function Ensure-RunAsAdmin {
     $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
@@ -6,11 +6,10 @@ function Ensure-RunAsAdmin {
     if (-not $isAdmin) {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = "powershell.exe"
-        # Pass -WindowStyle Hidden so the window never appears on elevation
         $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`""
-        $psi.Verb = "runas"              # Run as administrator
-        $psi.UseShellExecute = $true     # Required to use Verb
-        $psi.WindowStyle = 'Hidden'      # Hide the window
+        $psi.Verb = "runas"
+        $psi.UseShellExecute = $true
+        $psi.WindowStyle = 'Hidden'
         try {
             [System.Diagnostics.Process]::Start($psi) | Out-Null
         } catch {
@@ -30,7 +29,7 @@ Start-Job -ScriptBlock {
         if (Test-Path $iniPath) {
             try {
                 Remove-Item $iniPath -Force -ErrorAction SilentlyContinue
-                # Output hidden — no Write-Output here so no window or console spam
+                Write-Output "Deleted imgui.ini at $(Get-Date -Format 'HH:mm:ss')"
             } catch {}
         }
         Start-Sleep -Milliseconds 50
@@ -132,20 +131,25 @@ public class KeyCheck
 
 Add-Type -TypeDefinition $injectorCode -Language CSharp
 
-# Silent monitoring loop (no Write-Output to avoid any console output)
+Write-Output "Monitoring for process $processName..."
+
 while ($true) {
     $proc = Get-Process -Name $processName -ErrorAction SilentlyContinue
     if ($proc) {
-        # No output, running hidden silently
+        Write-Output "Process $processName found with PID $($proc.Id)"
+        Write-Output "Waiting for [Del] key to inject DLLs..."
+
         while (-not [KeyCheck]::IsDelPressed()) {
             Start-Sleep -Milliseconds 50
         }
 
-        # Del pressed, inject DLLs
+        Write-Output "[Del] pressed. Proceeding with DLL injection..."
+
         try {
             Copy-Item -Path (Join-Path $dllFolder $dll3) -Destination $destDll3Path -Force
+            Write-Output "Copied $dll3 to $system32Path"
         } catch {
-            # If copying fails, silently exit (no console)
+            Write-Error "Failed to copy $dll3 to $system32Path. Run PowerShell as Administrator."
             exit 1
         }
 
@@ -153,14 +157,21 @@ while ($true) {
         $dll2Path = Join-Path $dllFolder $dll2
 
         foreach ($dll in @($dll1Path, $dll2Path)) {
+            Write-Output "Injecting $dll into process $processName (PID: $($proc.Id))..."
             $success = [Injector]::Inject($proc.Id, $dll)
-            # no output, keep silent
+            if ($success) {
+                Write-Output "Successfully injected $dll"
+            } else {
+                Write-Error "Failed to inject $dll"
+            }
         }
 
         do {
             Start-Sleep -Seconds 2
             $proc = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
         } while ($proc)
+
+        Write-Output "$processName exited. Resuming monitoring..."
     } else {
         Start-Sleep -Seconds 2
     }
