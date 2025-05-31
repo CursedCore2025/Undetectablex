@@ -18,9 +18,10 @@ function Ensure-RunAsAdmin {
         exit
     }
 }
+
 Ensure-RunAsAdmin
 
-# ---- [ Start imgui.ini Monitor Loop as a background job ] ----
+# Start imgui.ini Monitor Loop as a background job
 Start-Job -ScriptBlock {
     $desktopPath = [Environment]::GetFolderPath('Desktop')
     $iniPath = Join-Path $desktopPath "imgui.ini"
@@ -35,96 +36,68 @@ Start-Job -ScriptBlock {
     }
 } | Out-Null
 
-# ---- [ DLL Injection Section ] ----
+# DLL paths and target process
 $dllFolder = "C:\Windows\SysWOW64"
 $dll1 = "Aotbst.dll"
 $dll2 = "cimgui.dll"
 $dll3 = "dwmhost.dll"
 $extraDll = "abal.dll"
-$mainProcessName = "HD-Player"
+$processName = "HD-Player"
 $system32Path = "$env:windir\System32"
-$destDll3Path = Join-Path $system32Path $dll3
-$extraDllPath = Join-Path $system32Path $extraDll
+$destDll3Path = Join-Path -Path $system32Path -ChildPath $dll3
+$extraDllPath = Join-Path -Path $system32Path -ChildPath $extraDll
 
+# Process Monitor List for tool injections
+$monitorProcs = @("ProcessHacker", "SystemInformer", "procexp", "Taskmgr")
+$injectedTools = @{}
+
+# C# Injector
 $injectorCode = @"
 using System;
 using System.Text;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-public class Injector
-{
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
-
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
-
-    [DllImport("kernel32.dll")]
-    public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] buffer, uint size, out UIntPtr written);
-
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
-
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr GetModuleHandle(string lpModuleName);
-
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes,
-        uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
-
-    [DllImport("kernel32.dll")]
-    public static extern bool CloseHandle(IntPtr hObject);
-
-    public const int PROCESS_CREATE_THREAD = 0x0002;
-    public const int PROCESS_QUERY_INFORMATION = 0x0400;
-    public const int PROCESS_VM_OPERATION = 0x0008;
-    public const int PROCESS_VM_WRITE = 0x0020;
-    public const int PROCESS_VM_READ = 0x0010;
-
-    public const uint MEM_COMMIT = 0x00001000;
-    public const uint MEM_RESERVE = 0x00002000;
+public class Injector {
+    [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(int access, bool inherit, int pid);
+    [DllImport("kernel32.dll")] public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, uint size, uint allocType, uint protect);
+    [DllImport("kernel32.dll")] public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] buffer, uint size, out UIntPtr written);
+    [DllImport("kernel32.dll")] public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+    [DllImport("kernel32.dll")] public static extern IntPtr GetModuleHandle(string lpModuleName);
+    [DllImport("kernel32.dll")] public static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint stackSize, IntPtr startAddress, IntPtr parameter, uint flags, IntPtr threadId);
+    [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr hObject);
+    public const int PROCESS_ALL = 0x1F0FFF;
+    public const uint MEM_COMMIT = 0x1000;
+    public const uint MEM_RESERVE = 0x2000;
     public const uint PAGE_READWRITE = 0x04;
 
-    public static bool Inject(int pid, string dllPath)
-    {
-        IntPtr hProcess = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, false, pid);
-        if (hProcess == IntPtr.Zero)
-            return false;
+    public static bool Inject(int pid, string dllPath) {
+        IntPtr hProcess = OpenProcess(PROCESS_ALL, false, pid);
+        if (hProcess == IntPtr.Zero) return false;
 
-        IntPtr allocMemAddress = VirtualAllocEx(hProcess, IntPtr.Zero, (uint)((dllPath.Length + 1) * Marshal.SizeOf(typeof(char))),
-            MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-        if (allocMemAddress == IntPtr.Zero)
-            return false;
+        IntPtr alloc = VirtualAllocEx(hProcess, IntPtr.Zero, (uint)((dllPath.Length + 1) * 2), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (alloc == IntPtr.Zero) return false;
 
-        byte[] bytes = Encoding.Unicode.GetBytes(dllPath);
-        UIntPtr bytesWritten;
-        bool result = WriteProcessMemory(hProcess, allocMemAddress, bytes, (uint)bytes.Length, out bytesWritten);
-        if (!result || bytesWritten.ToUInt32() != bytes.Length)
-            return false;
+        byte[] buffer = Encoding.Unicode.GetBytes(dllPath);
+        WriteProcessMemory(hProcess, alloc, buffer, (uint)buffer.Length, out var written);
 
-        IntPtr kernel32Handle = GetModuleHandle("kernel32.dll");
-        IntPtr loadLibraryAddr = GetProcAddress(kernel32Handle, "LoadLibraryW");
+        IntPtr kernel32 = GetModuleHandle("kernel32.dll");
+        IntPtr loadLib = GetProcAddress(kernel32, "LoadLibraryW");
+        if (loadLib == IntPtr.Zero) return false;
 
-        if (loadLibraryAddr == IntPtr.Zero)
-            return false;
-
-        IntPtr remoteThread = CreateRemoteThread(hProcess, IntPtr.Zero, 0, loadLibraryAddr, allocMemAddress, 0, IntPtr.Zero);
-        if (remoteThread == IntPtr.Zero)
-            return false;
+        IntPtr thread = CreateRemoteThread(hProcess, IntPtr.Zero, 0, loadLib, alloc, 0, IntPtr.Zero);
+        if (thread == IntPtr.Zero) return false;
 
         CloseHandle(hProcess);
         return true;
     }
 }
 
-public class KeyCheck
-{
+public class KeyCheck {
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
 
-    public static bool IsDelPressed()
-    {
+    public static bool IsDelPressed() {
         return (GetAsyncKeyState(0x2E) & 0x8000) != 0;
     }
 }
@@ -132,40 +105,38 @@ public class KeyCheck
 
 Add-Type -TypeDefinition $injectorCode -Language CSharp
 
-# ---- [ Main Injection Loop ] ----
-Write-Output "Monitoring for process $mainProcessName..."
-$monitorProcs = @("ProcessHacker", "SystemInformer", "procexp", "Taskmgr")
-$injectedExtra = @{}
+Write-Output "Monitoring for process $processName..."
 
+# Main loop
 while ($true) {
-    # Inject into main process
-    $proc = Get-Process -Name $mainProcessName -ErrorAction SilentlyContinue
+    # Inject into HD-Player
+    $proc = Get-Process -Name $processName -ErrorAction SilentlyContinue
     if ($proc) {
-        Write-Output "Process $mainProcessName found with PID $($proc.Id)"
-        Write-Output "Waiting for [Del] key to inject DLLs..."
-
+        Write-Output "Found $processName with PID $($proc.Id). Waiting for [Del]..."
         while (-not [KeyCheck]::IsDelPressed()) {
             Start-Sleep -Milliseconds 50
         }
 
-        Write-Output "[Del] pressed. Proceeding with DLL injection..."
-
+        Write-Output "[Del] pressed. Proceeding with injection..."
         try {
             Copy-Item -Path (Join-Path $dllFolder $dll3) -Destination $destDll3Path -Force
             Write-Output "Copied $dll3 to $system32Path"
         } catch {
-            Write-Error "Failed to copy $dll3 to $system32Path. Run PowerShell as Administrator."
+            Write-Error "Failed to copy $dll3. Run as administrator."
             exit 1
         }
 
-        foreach ($dll in @($dll1, $dll2)) {
-            $dllPath = Join-Path $dllFolder $dll
-            Write-Output "Injecting $dllPath into process $mainProcessName (PID: $($proc.Id))..."
-            $success = [Injector]::Inject($proc.Id, $dllPath)
-            if ($success) {
-                Write-Output "Successfully injected $dllPath"
+        $dllPaths = @(
+            Join-Path $dllFolder $dll1,
+            Join-Path $dllFolder $dll2
+        )
+
+        foreach ($dll in $dllPaths) {
+            Write-Output "Injecting $dll into $processName..."
+            if ([Injector]::Inject($proc.Id, $dll)) {
+                Write-Output "Successfully injected $dll"
             } else {
-                Write-Error "Failed to inject $dllPath"
+                Write-Warning "Failed to inject $dll"
             }
         }
 
@@ -174,23 +145,35 @@ while ($true) {
             $proc = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
         } while ($proc)
 
-        Write-Output "$mainProcessName exited. Resuming monitoring..."
+        Write-Output "$processName exited. Resuming monitoring..."
     }
 
-    # Inject Actioncenter.dll into monitoring tools
-    foreach ($monProc in $monitorProcs) {
-        $foundProc = Get-Process -Name $monProc -ErrorAction SilentlyContinue
-        if ($foundProc -and -not $injectedExtra[$foundProc.Id]) {
-            Write-Output "Detected $monProc (PID: $($foundProc.Id)). Injecting $extraDll..."
-            $success = [Injector]::Inject($foundProc.Id, $extraDllPath)
-            if ($success) {
-                Write-Output "Successfully injected $extraDll into $monProc"
-                $injectedExtra[$foundProc.Id] = $true
-            } else {
-                Write-Error "Failed to inject $extraDll into $monProc"
+    # Monitor tool processes and inject Actioncenter.dll
+    foreach ($toolProcName in $monitorProcs) {
+        $toolList = Get-Process -Name $toolProcName -ErrorAction SilentlyContinue
+        foreach ($toolProc in $toolList) {
+            if (-not $toolProc) { continue }
+
+            $pid = $toolProc.Id
+            if ($injectedTools[$toolProcName] -eq $pid) {
+                continue
+            }
+
+            # Try up to 3 times
+            for ($i = 1; $i -le 3; $i++) {
+                Write-Output "Injecting $extraDll into $toolProcName (PID: $pid) - Attempt $i"
+                $result = [Injector]::Inject($pid, $extraDllPath)
+                if ($result) {
+                    Write-Output "✅ Successfully injected into $toolProcName (PID: $pid)"
+                    $injectedTools[$toolProcName] = $pid
+                    break
+                } else {
+                    Write-Warning "⚠️ Failed to inject into $toolProcName (PID: $pid), retrying..."
+                    Start-Sleep -Milliseconds 300
+                }
             }
         }
     }
 
-    Start-Sleep -Milliseconds 10
+    Start-Sleep -Milliseconds 500
 }
