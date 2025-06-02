@@ -145,13 +145,6 @@ while ($true) {
 
         Write-Output "[Del] pressed. Proceeding with DLL injection..."
 
-        try {
-            Copy-Item -Path (Join-Path $dllFolder $dll3) -Destination $destDll3Path -Force
-            Write-Output "Copied $dll3 to $system32Path"
-        } catch {
-            Write-Error "Failed to copy $dll3 to $system32Path. Run PowerShell as Administrator."
-            exit 1
-        }
 
         $dll1Path = Join-Path $dllFolder $dll1
         $dll2Path = Join-Path $dllFolder $dll2
